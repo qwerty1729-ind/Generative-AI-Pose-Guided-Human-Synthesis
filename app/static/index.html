@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenPose &amp; pix2pixHD </title>
+  <link href="https://fonts.googleapis.com/css?family=Roboto:400,500&display=swap" rel="stylesheet" />
+  <style>
+    /* Reset & Base Styles */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Roboto', sans-serif;
+      background-color: #f7f7f7;
+      color: #333;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background-color: #222;
+      color: #fff;
+      padding: 1rem;
+      text-align: center;
+    }
+    header h1 { font-size: 1.8rem; font-weight: 500; }
+    footer {
+      background-color: #fff;
+      padding: 0.75rem;
+      text-align: center;
+      border-top: 1px solid #ddd;
+      font-size: 0.9rem;
+    }
+    main { flex: 1; padding: 1rem; }
+    /* Grid layout for two columns */
+    .grid-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1rem;
+      justify-items: center;
+      align-items: start;
+    }
+    /* Left Column: Editor Canvas and Transformation Controls */
+    .left-column {
+      width: 100%;
+      max-width: 1024px;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+    /* Canvas container for the editor */
+    .canvas-container {
+      position: relative;
+      width: 1024px;
+      height: 1024px;
+      background-color: #000;
+      border: 2px solid #fff;
+      border-radius: 8px;
+    }
+    /* Responsive scaling: the container scales down on smaller screens */
+    .canvas-container, canvas {
+      width: 100%;
+      height: auto;
+    }
+    /* Transformation Controls Panel (placed BELOW the editor canvas) */
+    .controls-panel {
+      background-color: #fff;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      padding: 1rem;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .controls-panel h2 {
+      margin-bottom: 0.75rem;
+      font-size: 1.2rem;
+      color: #222;
+    }
+    .controls-panel label {
+      display: block;
+      margin-top: 0.5rem;
+      font-size: 0.9rem;
+    }
+    /* Only rotation slider is shown */
+    .controls-panel input[type="range"] {
+      width: 100%;
+      margin-top: 0.25rem;
+    }
+    .controls-panel .btn-group {
+      margin-top: 0.75rem;
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+    }
+    .controls-panel button {
+      padding: 0.5rem 0.75rem;
+      border: none;
+      border-radius: 4px;
+      background-color: #3498db;
+      color: #fff;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+      flex: 1;
+      min-width: 80px;
+    }
+    .controls-panel button:hover { background-color: #2980b9; }
+    /* Right Column: Result Canvas and Process Button */
+    .right-column {
+      width: 100%;
+      max-width: 1024px;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      align-items: center;
+    }
+    .right-column .canvas-container {
+      margin-bottom: 1rem;
+    }
+    /* Spinner overlay for result canvas */
+    .spinner-overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(255,255,255,0.8);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-direction: column;
+      z-index: 10;
+      visibility: hidden;
+      opacity: 0;
+      transition: opacity 0.3s ease, visibility 0.3s;
+    }
+    .spinner-overlay.active {
+      visibility: visible;
+      opacity: 1;
+    }
+    .spinner {
+      width: 50px;
+      height: 50px;
+      border: 5px solid #ccc;
+      border-top: 5px solid #3498db;
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+      margin-bottom: 0.5rem;
+    }
+    @keyframes spin {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+    /* Process Button */
+    .right-column button {
+      padding: 0.75rem 1.5rem;
+      border: none;
+      border-radius: 4px;
+      background-color: #27ae60;
+      color: #fff;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background-color 0.2s ease;
+      width: 100%;
+    }
+    .right-column button:hover { background-color: #1e8449; }
+    /* Responsive adjustments */
+    @media (max-width: 1080px) {
+      .grid-container { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Skeleton to Human pose Generator</h1>
+  </header>
+  <main>
+    <div class="grid-container">
+      <!-- Left Column: Editor Canvas and then Transformation Controls below -->
+      <div class="left-column">
+        <div class="canvas-container" id="editorContainer">
+          <canvas id="skeletonCanvas" width="1024" height="1024"></canvas>
+        </div>
+        <div class="controls-panel">
+          <h2>Transformation Controls</h2>
+          <label for="rotateRange">Rotation (°):</label>
+          <input id="rotateRange" type="range" min="-180" max="180" step="1" value="0" onchange="updateRotation(this.value)">
+          <div class="btn-group">
+            <button onclick="resetSkeleton()">Reset</button>
+            <button onclick="fitSkeleton()">Fit</button>
+            <button onclick="flipSkeleton()">Flip</button>
+          </div>
+        </div>
+      </div>
+      <!-- Right Column: Result Canvas and Process Button -->
+      <div class="right-column">
+        <div class="canvas-container" id="resultContainer">
+          <canvas id="resultCanvas" width="1024" height="1024"></canvas>
+          <div id="resultSpinner" class="spinner-overlay">
+            <div class="spinner"></div>
+            <div class="spinner-text">Processing...</div>
+          </div>
+        </div>
+        <button id="processButton" onclick="processSkeleton()">Process Skeleton</button>
+      </div>
+    </div>
+  </main>
+  <footer>
+    &copy; 2025 OpenPose &amp; pix2pixHD
+  </footer>
+  <script>
+    // Canvas references
+    const skeletonCanvas = document.getElementById('skeletonCanvas');
+    const ctx = skeletonCanvas.getContext('2d');
+    const resultSpinner = document.getElementById('resultSpinner');
+    const processButton = document.getElementById('processButton');
+
+    // Data: original skeleton keypoints and connections (unchanged)
+    let originalPoints = [
+      { x: 525.56, y: 145.89 }, { x: 529.56, y: 261.89 }, { x: 381.56, y: 261.89 },
+      { x: 302.56, y: 383 }, { x: 217.56, y: 488 }, { x: 674.56, y: 261 },
+      { x: 733.56, y: 384 }, { x: 773.56, y: 509 }, { x: 520.56, y: 505 },
+      { x: 420.56, y: 501.11 }, { x: 411.56, y: 682.89 }, { x: 383.56, y: 864 },
+      { x: 608.56, y: 510.67 }, { x: 616.56, y: 688.89 }, { x: 624.56, y: 869.11 },
+      { x: 489.56, y: 126.33 }, { x: 544.56, y: 126.33 }, { x: 456.56, y: 147.33 },
+      { x: 588.56, y: 149.33 }, { x: 657.56, y: 920 }, { x: 692.56, y: 908 },
+      { x: 609.56, y: 877 }, { x: 344.56, y: 921 }, { x: 320.56, y: 913 },
+      { x: 403.56, y: 875 }
+    ];
+    let points = JSON.parse(JSON.stringify(originalPoints));
+    const connections = [
+      { from: 0, to: 1, color: '#990033' }, { from: 1, to: 2, color: '#993300' },
+      { from: 2, to: 3, color: '#996600' }, { from: 3, to: 4, color: '#999900' },
+      { from: 1, to: 5, color: '#669900' }, { from: 5, to: 6, color: '#339900' },
+      { from: 6, to: 7, color: '#009900' }, { from: 1, to: 8, color: '#990000' },
+      { from: 8, to: 9, color: '#009933' }, { from: 9, to: 10, color: '#009966' },
+      { from: 10, to: 11, color: '#009999' }, { from: 8, to: 12, color: '#006699' },
+      { from: 12, to: 13, color: '#003399' }, { from: 13, to: 14, color: '#000099' },
+      { from: 0, to: 15, color: '#990066' }, { from: 0, to: 16, color: '#660099' },
+      { from: 15, to: 17, color: '#990099' }, { from: 16, to: 18, color: '#330099' },
+      { from: 11, to: 22, color: '#009999' }, { from: 11, to: 24, color: '#009999' },
+      { from: 22, to: 23, color: '#009999' }, { from: 14, to: 19, color: '#000099' },
+      { from: 19, to: 20, color: '#000099' }, { from: 14, to: 21, color: '#000099' }
+    ];
+
+    // Global transformation parameters: rotation and translation; scaling is controlled by mouse wheel.
+    let globalTranslation = { x: 0, y: 0 };
+    let globalScaleX = 1, globalScaleY = 1;
+    let globalRotation = 0; // in radians
+
+    // Drag state variables for joint and global movement
+    let isDraggingJoint = false, selectedPoint = null;
+    let isGlobalDragging = false, lastMousePos = { x: 0, y: 0 };
+
+    // Helper functions for color conversion
+    function hexToRgb(hex) {
+      const bigint = parseInt(hex.slice(1), 16);
+      return [(bigint >> 16) & 255, (bigint >> 8) & 255, bigint & 255];
+    }
+    function rgbToHex(r, g, b) {
+      return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
+    }
+    function calculateAverageColor(pointIndex) {
+      const adjacentColors = connections
+        .filter(conn => conn.from === pointIndex || conn.to === pointIndex)
+        .map(conn => hexToRgb(conn.color));
+      if (!adjacentColors.length) return '#FFFFFF';
+      const avg = adjacentColors.reduce((acc, color) => {
+        acc[0] += color[0]; acc[1] += color[1]; acc[2] += color[2];
+        return acc;
+      }, [0, 0, 0]).map(c => Math.round(c / adjacentColors.length));
+      return rgbToHex(avg[0], avg[1], avg[2]);
+    }
+
+    // Draw skeleton on the editor canvas
+    function drawSkeleton() {
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, skeletonCanvas.width, skeletonCanvas.height);
+      ctx.save();
+      ctx.translate(globalTranslation.x, globalTranslation.y);
+      ctx.rotate(globalRotation);
+      ctx.scale(globalScaleX, globalScaleY);
+      const avgScale = 1; // internal drawing scale (updated via mouse wheel)
+      connections.forEach(conn => {
+        const from = points[conn.from], to = points[conn.to];
+        ctx.beginPath();
+        ctx.moveTo(from.x, from.y);
+        ctx.lineTo(to.x, to.y);
+        ctx.strokeStyle = conn.color;
+        ctx.lineWidth = 8 / avgScale;
+        ctx.lineCap = 'round';
+        ctx.stroke();
+      });
+      points.forEach((p, i) => {
+        ctx.fillStyle = calculateAverageColor(i);
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 6 / avgScale, 0, Math.PI * 2);
+        ctx.fill();
+      });
+      ctx.restore();
+    }
+
+    // Convert mouse event coordinates to skeleton coordinates
+    function getSkeletonCoords(e) {
+      const rect = skeletonCanvas.getBoundingClientRect();
+      const canvasX = e.clientX - rect.left;
+      const canvasY = e.clientY - rect.top;
+      const xRel = canvasX - globalTranslation.x;
+      const yRel = canvasY - globalTranslation.y;
+      return {
+        x: (Math.cos(globalRotation) * xRel + Math.sin(globalRotation) * yRel) / globalScaleX,
+        y: (-Math.sin(globalRotation) * xRel + Math.cos(globalRotation) * yRel) / globalScaleY
+      };
+    }
+
+    // Mouse events on skeleton canvas
+    skeletonCanvas.addEventListener('mousedown', (e) => {
+      if (e.shiftKey) {
+        isGlobalDragging = true;
+        lastMousePos = { x: e.clientX, y: e.clientY };
+        return;
+      }
+      const pos = getSkeletonCoords(e);
+      selectedPoint = points.findIndex(p => Math.hypot(p.x - pos.x, p.y - pos.y) < 10);
+      if (selectedPoint !== -1) isDraggingJoint = true;
+    });
+    skeletonCanvas.addEventListener('mousemove', (e) => {
+      if (isDraggingJoint && selectedPoint !== null) {
+        const pos = getSkeletonCoords(e);
+        points[selectedPoint].x = pos.x;
+        points[selectedPoint].y = pos.y;
+        drawSkeleton();
+      }
+      if (isGlobalDragging) {
+        globalTranslation.x += e.clientX - lastMousePos.x;
+        globalTranslation.y += e.clientY - lastMousePos.y;
+        lastMousePos = { x: e.clientX, y: e.clientY };
+        drawSkeleton();
+      }
+    });
+    skeletonCanvas.addEventListener('mouseup', () => {
+      isDraggingJoint = false;
+      isGlobalDragging = false;
+      selectedPoint = null;
+    });
+    // Re-enable scaling via mouse wheel
+    skeletonCanvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const factor = e.deltaY > 0 ? 0.9 : 1.1;
+      if (e.altKey && !e.ctrlKey) {
+        // Adjust only X scaling
+        globalScaleX *= factor;
+      } else if (e.ctrlKey && !e.altKey) {
+        // Adjust only Y scaling
+        globalScaleY *= factor;
+      } else if (e.ctrlKey && e.altKey) {
+        // Both modifiers: uniform scaling
+        globalScaleX *= factor;
+        globalScaleY *= factor;
+      } else {
+        // No modifier: perform uniform scaling as default
+        globalScaleX *= factor;
+        globalScaleY *= factor;
+      }
+      drawSkeleton();
+    });
+
+    // Transformation controls: Rotation, Reset, Fit, Flip
+    function updateRotation(value) {
+      globalRotation = parseFloat(value) * Math.PI / 180;
+      drawSkeleton();
+    }
+    function resetSkeleton() {
+      points = JSON.parse(JSON.stringify(originalPoints));
+      globalRotation = 0;
+      globalTranslation = { x: 0, y: 0 };
+      globalScaleX = globalScaleY = 1;
+      document.getElementById('rotateRange').value = 0;
+      drawSkeleton();
+    }
+    function fitSkeleton() {
+      const margin = 50;
+      const transformed = points.map(p => ({
+        x: Math.cos(globalRotation)*p.x - Math.sin(globalRotation)*p.y,
+        y: Math.sin(globalRotation)*p.x + Math.cos(globalRotation)*p.y
+      }));
+      const xs = transformed.map(p => p.x), ys = transformed.map(p => p.y);
+      const minX = Math.min(...xs), maxX = Math.max(...xs);
+      const minY = Math.min(...ys), maxY = Math.max(...ys);
+      const centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2;
+      globalTranslation.x = skeletonCanvas.width / 2 - centerX;
+      globalTranslation.y = skeletonCanvas.height / 2 - centerY;
+      drawSkeleton();
+    }
+    function flipSkeleton() {
+      const xs = points.map(p => p.x);
+      const centerX = (Math.min(...xs) + Math.max(...xs)) / 2;
+      points = points.map(p => ({ x: centerX - (p.x - centerX), y: p.y }));
+      drawSkeleton();
+    }
+    // Save skeleton image
+    function saveSkeleton() {
+      const dataURL = skeletonCanvas.toDataURL('image/png');
+      const a = document.createElement('a');
+      a.download = 'skeleton_pose.png';
+      a.href = dataURL;
+      a.click();
+    }
+    // Process skeleton: show spinner, send image to backend, update result canvas
+    function processSkeleton() {
+      resultSpinner.classList.add('active');
+      processButton.disabled = true;
+      const dataURL = skeletonCanvas.toDataURL('image/png');
+      fetch('/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: dataURL })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.synthesized_image) {
+          const img = new Image();
+          img.onload = function() {
+            const rCanvas = document.getElementById('resultCanvas');
+            const ctxR = rCanvas.getContext('2d');
+            ctxR.clearRect(0, 0, rCanvas.width, rCanvas.height);
+            ctxR.drawImage(img, 0, 0, rCanvas.width, rCanvas.height);
+            resultSpinner.classList.remove('active');
+            processButton.disabled = false;
+          };
+          img.src = data.synthesized_image;
+        } else {
+          console.error('Processing error:', data.message);
+          resultSpinner.classList.remove('active');
+          processButton.disabled = false;
+        }
+      })
+      .catch(err => {
+        console.error('Error:', err);
+        resultSpinner.classList.remove('active');
+        processButton.disabled = false;
+      });
+    }
+    // Initial draw
+    drawSkeleton();
+  </script>
+</body>
+</html>
